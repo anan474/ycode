@@ -87,7 +87,11 @@ export async function set(key: string, value: unknown): Promise<void> {
     }
 
     // Persist to .env so credentials survive a dev server restart
-    await writeEnvFile(config);
+    try {
+      await writeEnvFile(config);
+    } catch (err) {
+      console.warn('[credentials] Could not write to .env file (permission denied or read-only filesystem):', err);
+    }
   }
 }
 
