@@ -245,6 +245,39 @@ export async function handleMcpGet(request: Request): Promise<Response> {
 
     session.lastActivity = Date.now();
     const response = await session.transport.handleRequest(normalized);
+
+    // In Next.js App Router, HTTP response headers are held back until the first stream chunk is written.
+    // Prepending an initial SSE comment (: connected\n\n) forces Next.js and reverse proxies
+    // (Cloudflare/Dokploy/Traefik) to immediately flush the 200 OK headers over the network.
+    if (response.body) {
+      const ping = new TextEncoder().encode(': connected\n\n');
+      const reader = response.body.getReader();
+      const stream = new ReadableStream({
+        async start(controller) {
+          controller.enqueue(ping);
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              controller.enqueue(value);
+            }
+            controller.close();
+          } catch (err) {
+            controller.error(err);
+          }
+        },
+        cancel(reason) {
+          reader.cancel(reason);
+        },
+      });
+
+      return addCorsHeaders(new Response(stream, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      }));
+    }
+
     return addCorsHeaders(response);
   } catch (error) {
     console.error('[MCP GET] Error:', error);
