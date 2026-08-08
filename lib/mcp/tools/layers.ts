@@ -12,6 +12,7 @@ import {
   getTiptapTextContent,
   buildTiptapDoc,
   applyDesignToLayer,
+  applyBackgroundImageDesign,
 } from '@/lib/mcp/utils';
 import type { RichTextBlock } from '@/lib/mcp/utils';
 import { layerToExportHtml } from '@/lib/html-layer-converter';
@@ -447,13 +448,26 @@ LINK TYPES:
         ? { type: 'asset' as const, data: { asset_id } }
         : { type: 'dynamic_text' as const, data: { content: url! } };
 
-      const updated = updateLayerById(layers, layer_id, (l) => ({
+      // Set the variable AND the design/classes that render it — the variable
+      // alone only supplies the --bg-img value, nothing displays it without
+      // the bg-[image:var(--bg-img)] class.
+      const updated = updateLayerById(layers, layer_id, (l) => applyBackgroundImageDesign({
         ...l,
         variables: { ...l.variables, backgroundImage: { src } },
       }));
 
       await savePageLayers(page_id, updated);
-      return { content: [{ type: 'text' as const, text: `Set background image for "${layer.customName || layer.name}"` }] };
+      const updatedLayer = findLayerById(updated, layer_id);
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            message: `Set background image for "${layer.customName || layer.name}"`,
+            layer_id,
+            classes: updatedLayer?.classes,
+          }),
+        }],
+      };
     },
   );
 
@@ -480,7 +494,7 @@ COMMON USES:
       layer_id: z.string().describe('The layer ID'),
       tag: z.string().optional().describe('HTML tag override: h1, h2, h3, h4, h5, h6, p, span, div, section, nav, footer, header, main, aside, article'),
       html_id: z.string().optional().describe('Custom HTML element ID (for anchor links, CSS targeting)'),
-      html_embed_code: z.string().optional().describe('For htmlEmbed layers: the HTML/CSS/JS code to embed'),
+      html_embed_code: z.string().optional().describe('For htmlEmbed layers: the HTML/CSS/JS code to embed. Runs in a sandboxed iframe on the published site — it cannot overlay the page or access the parent DOM'),
       custom_attributes: z.record(z.string(), z.string()).optional().describe('Custom HTML attributes as { name: value } pairs'),
       custom_name: z.string().optional().describe('Display name for the layer in the builder'),
       hidden: z.boolean().optional().describe('Hide the layer on the canvas (still renders on the published site).'),
