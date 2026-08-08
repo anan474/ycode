@@ -54,17 +54,12 @@ export async function authenticateToken(token: string): Promise<boolean> {
 }
 
 export function addCorsHeaders(response: Response): Response {
-  const headers = new Headers(response.headers);
-  headers.set('Access-Control-Allow-Origin', '*');
-  headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  headers.set('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, mcp-protocol-version, Authorization');
-  headers.set('Access-Control-Expose-Headers', 'mcp-session-id');
+  response.headers.set('Access-Control-Allow-Origin', '*');
+  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, mcp-protocol-version, Authorization');
+  response.headers.set('Access-Control-Expose-Headers', 'mcp-session-id');
 
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return response;
 }
 
 function createSessionTransport() {
