@@ -58,6 +58,12 @@ export function addCorsHeaders(response: Response): Response {
   response.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   response.headers.set('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, mcp-protocol-version, Authorization');
   response.headers.set('Access-Control-Expose-Headers', 'mcp-session-id');
+  response.headers.set('X-Accel-Buffering', 'no');
+
+  if (response.headers.get('content-type')?.includes('text/event-stream')) {
+    response.headers.set('Cache-Control', 'no-cache, no-transform');
+    response.headers.set('Connection', 'keep-alive');
+  }
 
   return response;
 }
@@ -104,7 +110,7 @@ async function autoInitialize(
       id: '_auto_init',
       method: 'initialize',
       params: {
-        protocolVersion: '2025-03-26',
+        protocolVersion: '2024-11-05',
         capabilities: {},
         clientInfo: { name: 'ycode-auto', version: '1.0.0' },
       },
@@ -158,6 +164,13 @@ async function handlePost(request: Request): Promise<Response> {
 
   const body = await normalized.json();
   const isInit = !Array.isArray(body) && body.method === 'initialize';
+  const isNotification = !Array.isArray(body) && body.method === 'notifications/initialized';
+
+  // If client sends notifications/initialized on a worker where session memory was lost,
+  // return 202 Accepted directly without failing the connection.
+  if (isNotification && (!sessionId || !sessions.has(sessionId))) {
+    return new Response(null, { status: 202 });
+  }
 
   const { server, transport } = createSessionTransport();
   await server.connect(transport);
@@ -204,8 +217,22 @@ export async function handleMcpPost(request: Request): Promise<Response> {
 
 export async function handleMcpGet(request: Request): Promise<Response> {
   try {
-    const sessionId = request.headers.get('mcp-session-id');
-    if (!sessionId || !sessions.has(sessionId)) {
+    const normalized = ensureAcceptHeader(request);
+    let sessionId = normalized.headers.get('mcp-session-id');
+
+    let session = sessionId ? sessions.get(sessionId) : undefined;
+
+    // If session is missing in worker memory on serverless, auto-initialize a fresh session transport
+    if (!session) {
+      const { server, transport } = createSessionTransport();
+      await server.connect(transport);
+      await autoInitialize(transport, normalized.url);
+      if (transport.sessionId) {
+        session = sessions.get(transport.sessionId);
+      }
+    }
+
+    if (!session) {
       return addCorsHeaders(new Response(JSON.stringify({
         jsonrpc: '2.0',
         error: { code: -32000, message: 'Session not found. Send a POST initialize first.' },
@@ -216,9 +243,8 @@ export async function handleMcpGet(request: Request): Promise<Response> {
       }));
     }
 
-    const session = sessions.get(sessionId)!;
     session.lastActivity = Date.now();
-    const response = await session.transport.handleRequest(request);
+    const response = await session.transport.handleRequest(normalized);
     return addCorsHeaders(response);
   } catch (error) {
     console.error('[MCP GET] Error:', error);
